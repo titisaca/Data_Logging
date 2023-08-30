@@ -1,9 +1,6 @@
-import React, { useState, useEffect,useRef,useCallback } from 'react';
-// import FaceDetection from './FaceDetection';
-import './App.css'
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-
-import * as faceapi from 'face-api.js'
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import './App.css';
+import * as faceapi from 'face-api.js';
 
 function ConsoleOutput({ logData }) {
   return (
@@ -18,31 +15,42 @@ function ConsoleOutput({ logData }) {
   );
 }
 
-
-
 function App() {
   const [logData, setLogData] = useState([]);
   const [permissionStatus, setPermissionStatus] = useState('');
+  const [faceExpressionData, setFaceExpressionData] = useState([]);
+  const [sensorData, setSensorData] = useState([]);
+  const [isRunning, setIsRunning] = useState(false);
+  const [intervalId, setIntervalId] = useState(null);
 
   const loadModels = useCallback(() => {
     Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
-      faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
-      faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
-      faceapi.nets.faceExpressionNet.loadFromUri("/models")
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+      faceapi.nets.faceExpressionNet.loadFromUri('/models'),
     ]).then(() => {
       faceMyDetect();
     });
   }, []);
 
   useEffect(() => {
-    if (
-      'DeviceMotionEvent' in window &&
-      typeof DeviceMotionEvent.requestPermission === 'function'
-    ) {
-      setPermissionStatus('pending');
-    }
-  }, []);
+    startVideo();
+    loadModels();
+  }, [loadModels]);
+
+  const videoRef = useRef();
+  const canvasRef = useRef();
+
+  const startVideo = () => {
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then((currentStream) => {
+        videoRef.current.srcObject = currentStream;
+      })
+      .catch((err) => {
+        console.log(err);
+      });
+  };
 
   const logToConsole = (data) => {
     const timestamp = new Date().toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', fractionalSecondDigits: 3 });
@@ -55,6 +63,7 @@ function App() {
     const accelerometerData = event.accelerationIncludingGravity;
     const gyroscopeData = event.rotationRate;
     logToConsole({ acceleration: accelerometerData, rotationRate: gyroscopeData });
+    setSensorData((prevSensorData) => [...prevSensorData, logToCSV(accelerometerData, gyroscopeData)]);
   };
 
   const requestDeviceMotionAccess = () => {
@@ -69,9 +78,6 @@ function App() {
       });
     }
   };
-
-  const [isRunning, setIsRunning] = useState(false);
-  const [intervalId, setIntervalId] = useState(null);
 
   const toggleDemo = () => {
     if (isRunning) {
@@ -93,13 +99,19 @@ function App() {
     }
   };
 
-  const exportToCSV = () => {
-    if (logData.length === 0) {
+  const logToCSV = (accelerometerData, gyroscopeData) => {
+    const timestamp = new Date().toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', fractionalSecondDigits: 3 });
+    return `${timestamp},${accelerometerData.x},${accelerometerData.y},${accelerometerData.z},${gyroscopeData.alpha},${gyroscopeData.beta},${gyroscopeData.gamma}`;
+  };
+
+  const exportSensorDataToCSV = () => {
+    if (sensorData.length === 0) {
       return;
     }
 
     const columnNames = 'Date, Time, Accelerometer_X, Accelerometer_Y, Accelerometer_Z, Gyroscope_Alpha, Gyroscope_Beta, Gyroscope_Gamma';
-    const csvContent = `${columnNames}\n${logData.join('\n')}`;
+    const csvContent = columnNames + '\n' + sensorData.join('\n');
+
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -108,69 +120,72 @@ function App() {
     a.click();
     URL.revokeObjectURL(url);
   };
-  const videoRef = useRef()
-  const canvasRef = useRef()
 
-  // LOAD FROM USEEFFECT
-  useEffect(()=>{
-    startVideo()
-    videoRef && loadModels()
+  const exportExpressionDataToCSV = () => {
+    if (faceExpressionData.length === 0) {
+      return;
+    }
 
-  },[loadModels])
+    const columnNames = 'Date, Time, Happy, Sad, Surprised, Neutral, Fearful, Disgusted, Angry';
+    const csvRows = faceExpressionData.map((entry) => [
+      entry.timestamp,
+      entry.happy.toFixed(2),
+      entry.sad.toFixed(2),
+      entry.surprised.toFixed(2),
+      entry.neutral.toFixed(2),
+      entry.fearful.toFixed(2),
+      entry.disgusted.toFixed(2),
+      entry.angry.toFixed(2),
+    ]);
 
+    const updatedCsvContent = [columnNames, ...csvRows.map((row) => row.join(','))].join('\n');
+    const blob = new Blob([updatedCsvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'expression_data.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
+  const faceMyDetect = () => {
+    setInterval(async () => {
+      const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceExpressions();
 
-  // OPEN YOU FACE WEBCAM
-  const startVideo = ()=>{
-    navigator.mediaDevices.getUserMedia({video:true})
-    .then((currentStream)=>{
-      videoRef.current.srcObject = currentStream
-    })
-    .catch((err)=>{
-      console.log(err)
-    })
-  }
-  // LOAD MODELS FROM FACE API
+      const expressionData = {
+        timestamp: new Date().toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', fractionalSecondDigits: 3 }),
+        happy: detections[0]?.expressions.happy || 0,
+        sad: detections[0]?.expressions.sad || 0,
+        surprised: detections[0]?.expressions.surprised || 0,
+        neutral: detections[0]?.expressions.neutral || 0,
+        fearful: detections[0]?.expressions.fearful || 0,
+        disgusted: detections[0]?.expressions.disgusted || 0,
+        angry: detections[0]?.expressions.angry || 0,
+      };
+      console.log('Expression data:', expressionData);
 
- 
-  
-  useEffect(() => {
-    startVideo();
-    videoRef.current && loadModels();
-  }, [loadModels]); // Add loadModels to the dependency array
-  
-  const faceMyDetect = ()=>{
-    setInterval(async()=>{
-      const detections = await faceapi.detectAllFaces(videoRef.current,
-        new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceExpressions()
+      setFaceExpressionData((prevData) => [...prevData, expressionData]);
 
-      // DRAW YOU FACE IN WEBCAM
-      canvasRef.current.innerHTML = faceapi.createCanvasFromMedia(videoRef.current)
-      faceapi.matchDimensions(canvasRef.current,{
-        width:940,
-        height:650
-      })
+      canvasRef.current.innerHTML = faceapi.createCanvasFromMedia(videoRef.current);
+      faceapi.matchDimensions(canvasRef.current, {
+        width: 940,
+        height: 650,
+      });
 
-      const resized = faceapi.resizeResults(detections,{
-         width:940,
-        height:650
-      })
+      const resized = faceapi.resizeResults(detections, {
+        width: 940,
+        height: 650,
+      });
 
-      faceapi.draw.drawDetections(canvasRef.current,resized)
-      faceapi.draw.drawFaceLandmarks(canvasRef.current,resized)
-      faceapi.draw.drawFaceExpressions(canvasRef.current,resized)
-
-
-    },1000)
-  }
+      faceapi.draw.drawDetections(canvasRef.current, resized);
+      faceapi.draw.drawFaceLandmarks(canvasRef.current, resized);
+      faceapi.draw.drawFaceExpressions(canvasRef.current, resized);
+    }, 1000);
+  };
 
   return (
-    
     <div>
-     
-
       <h1>Combined Demo: Face Detection, Accelerometer, and Gyroscope</h1>
-      
       <div className="myapp">
         <h2>Face Detection</h2>
         <div className="appvideo">
@@ -178,12 +193,14 @@ function App() {
         </div>
         <canvas ref={canvasRef} width="940" height="650" className="appcanvas" />
       </div>
-      
+      <div className="expression-data-demo">
+        <h2>Expression Data Demo</h2>
+        <button onClick={exportExpressionDataToCSV}>Export Expression Data to CSV</button>
+        <ConsoleOutput logData={logData} />
+      </div>
       <div className="accelerometer-gyroscope-demo">
         <h2>Accelerometer and Gyroscope Demo</h2>
-        <div>
-          <button onClick={exportToCSV}>Export to CSV</button>
-        </div>
+        <button onClick={exportSensorDataToCSV}>Export Sensor Data to CSV</button>
         <button
           id="start_demo"
           className={`btn ${isRunning ? 'btn-danger' : 'btn-success'}`}
@@ -196,18 +213,12 @@ function App() {
         ) : permissionStatus === 'pending' ? (
           <button onClick={requestDeviceMotionAccess}>Request Device Motion Access</button>
         ) : (
-          <p>
-            Permission status: Denied. Enable motion and orientation access in your browser settings.
-          </p>
+          <p>Permission status: Denied. Enable motion and orientation access in your browser settings.</p>
         )}
         <ConsoleOutput logData={logData} />
       </div>
-      
     </div>
   );
-  
-
-  
 }
 
 export default App;
