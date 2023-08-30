@@ -36,3 +36,22 @@
     transform: rotate(360deg);
   }
 }
+
+.appvide{
+  display: flex;
+  align-items: center;
+}
+
+.appcanvas{
+  position: absolute;
+  top: 100px
+}
+
+.myapp{
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+}
